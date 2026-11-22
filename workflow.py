@@ -87,12 +87,17 @@ class VisionTest:
                 self.capture(level, read_row=False)
         return self.capture(first, startup=not reposition)
 
-    def answer(self, row):
+    def answer(self, row, *, first_row):
         for attempt in range(4):
-            message = (
-                "Speak now."
-                if attempt == 0 else "Please repeat all five directions, from left to right. Speak now."
-            )
+            if attempt:
+                message = "Please repeat all five directions from left to right. Speak now."
+            elif first_row:
+                message = (
+                    "Look at the five symbols. Starting on the left, say which way each gap opens: "
+                    "up, down, left, or right. If you can’t tell, say ‘skip.’ Speak now."
+                )
+            else:
+                message = "Next row. Speak now."
             self.desktop.say(message)
             transcript = self.listen(self.listen_seconds, stop_on_pause=attempt == 0)
             row.transcripts.append(transcript)
@@ -158,18 +163,14 @@ class VisionTest:
                 continue
             row = Row(chart)
             rows.append(row)
-            self.answer(row)
+            self.answer(row, first_row=len(rows) == 1)
         subject = "both eyes" if eye == "both" else "this eye"
         self.session.results[eye] = summarize(rows, subject)
 
     def run(self, *, start_at="20/200"):
         self.desktop.say("It’s time for the vision test.")
         both = self.starting_chart()
-        self.desktop.say(
-            "Keep both eyes open. "
-            "For each symbol, say where the opening is: up, down, left, or right. "
-            "Say skip if you can’t tell. Wait for the speak now cue before giving your directions."
-        )
+        self.desktop.say("Keep both eyes open.")
         if not self.wait_for_start("To begin the both eyes round, say ready or start.", max(8, self.listen_seconds)):
             raise ChartError("Could not confirm readiness. The both-eyes round did not start.")
         self.run_round("both", both, start_at)
