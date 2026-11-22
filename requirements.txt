@@ -1,0 +1,11 @@
+# faster-whisper 1.2.1 uses the metadata_errors parameter removed in newer PyAV.
+av>=16,<17
+faster-whisper>=1.1,<2
+mss>=10.2,<11
+numpy>=2,<3
+Pillow>=11,<14
+psutil>=6,<9
+scipy>=1.15,<2
+sounddevice>=0.5,<1
+pyobjc-framework-Cocoa>=11; sys_platform == "darwin"
+pyobjc-framework-Quartz>=11; sys_platform == "darwin"
