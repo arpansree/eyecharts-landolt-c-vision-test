@@ -12,6 +12,8 @@ from PIL import Image
 
 from chart_reader import ChartError
 
+MAC_BUNDLE_ID = "org.eyecharts.app"
+
 
 class EyeChartsDesktop:
     def __init__(self, monitor):
@@ -41,7 +43,7 @@ class EyeChartsDesktop:
             from AppKit import NSWorkspace
 
             app = NSWorkspace.sharedWorkspace().frontmostApplication()
-            if app and app.bundleIdentifier() == "org.eyecharts.app":
+            if app and app.bundleIdentifier() == MAC_BUNDLE_ID:
                 return app.processIdentifier()
             return None
 
@@ -62,7 +64,11 @@ class EyeChartsDesktop:
         return None
 
     def wait_for_focus(self):
-        print("Switch to fullscreen EyeCharts on the selected monitor.", flush=True)
+        if self.system == "Darwin" and self.foreground() is None:
+            opened = subprocess.run(["/usr/bin/open", "-b", MAC_BUNDLE_ID], capture_output=True)
+            if opened.returncode:
+                print("Could not open EyeCharts automatically. Open it from Applications.", flush=True)
+        print("Keep fullscreen EyeCharts in front on the selected monitor.", flush=True)
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             if self.foreground() is not None:
