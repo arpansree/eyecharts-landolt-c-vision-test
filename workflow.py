@@ -6,6 +6,7 @@ from chart_reader import Chart, ChartError, DIRECTIONS, read_acuity, read_direct
 from speech_input import AudioCaptureError, parse_answers, words
 
 LANDOLT_LEVELS = tuple(f"20/{value}" for value in (200, 160, 125, 100, 80, 60, 50, 40, 30, 25, 20))
+SCORED_LEVELS = ("20/200", "20/100", "20/80", "20/50", "20/40", "20/30", "20/25", "20/20")
 
 
 @dataclass
@@ -89,11 +90,11 @@ class VisionTest:
     def answer(self, row):
         for attempt in range(4):
             message = (
-                "Read the five gaps from left to right. Speak now."
+                "Speak now."
                 if attempt == 0 else "Please repeat all five directions, from left to right. Speak now."
             )
             self.desktop.say(message)
-            transcript = self.listen(self.listen_seconds)
+            transcript = self.listen(self.listen_seconds, stop_on_pause=attempt == 0)
             row.transcripts.append(transcript)
             if self.capture(row.chart.acuity) != row.chart:
                 raise ChartError("The EyeCharts row changed while the participant was answering.")
@@ -105,9 +106,9 @@ class VisionTest:
                 return
         self.desktop.say("We couldn’t score that response.")
 
-    def listen(self, seconds):
+    def listen(self, seconds, *, stop_on_pause=True):
         try:
-            return self.speech.listen(seconds)
+            return self.speech.listen(seconds, stop_on_pause=stop_on_pause)
         except AudioCaptureError as error:
             print(f"Microphone capture failed: {error}", flush=True)
             return ""
@@ -148,15 +149,13 @@ class VisionTest:
         if chart != start:
             raise ChartError("The starting row changed after reset.")
         first = LANDOLT_LEVELS.index(start_at)
-        for level in LANDOLT_LEVELS[1:first + 1]:
-            self.desktop.step(smaller=True)
-            chart = self.capture(level, read_row=level == start_at)
-        for index, level in enumerate(LANDOLT_LEVELS[first:]):
+        for index, level in enumerate(LANDOLT_LEVELS):
+            scored = index >= first and level in SCORED_LEVELS
             if index:
-                if self.capture(chart.acuity) != chart:
-                    raise ChartError("The EyeCharts row changed before advance.")
                 self.desktop.step(smaller=True)
-                chart = self.capture(level)
+                chart = self.capture(level, read_row=scored)
+            if not scored:
+                continue
             row = Row(chart)
             rows.append(row)
             self.answer(row)

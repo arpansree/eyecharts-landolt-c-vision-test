@@ -1,6 +1,6 @@
 # EyeCharts Vision Test
 
-The Prev-Hub vision prototype reads a Landolt C chart from EyeCharts and guides the participant by voice. It runs three rounds, both eyes, right eye, and left eye, from 20/200 to 20/20. Whisper large-v3 runs locally.
+The Prev-Hub vision prototype reads a Landolt C chart from EyeCharts and guides the participant by voice. It runs three rounds, both eyes, right eye, and left eye, from 20/200 to 20/20. Each round scores eight rows: 20/200, 20/100, 20/80, 20/50, 20/40, 20/30, 20/25, and 20/20. Whisper large-v3 runs locally.
 
 ## Setup
 
@@ -39,6 +39,8 @@ On macOS, allow Terminal or Python access to Screen Recording, Accessibility, an
 3. Leave EyeCharts in front. On Windows, switch back to EyeCharts after launching the program. Say “ready” or “start” once per round. After each “Speak now” cue, say the five gap directions from left to right. Say “skip” for any you can’t see.
 
 EyeCharts resets to 20/200 between rounds. To protect user privacy, the app keeps scores out of the spoken prompts. The kiosk is where users will review and optionally print their results.
+
+The app can finish listening early after a pause. If it needs a repeat, it listens for the full answer window. The terminal shows the total test time after completion.
 
 ## Save results
 

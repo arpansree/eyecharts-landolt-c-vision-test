@@ -1,5 +1,6 @@
 """Transcribe local microphone audio with Whisper large-v3."""
 import logging
+import math
 import re
 import sys
 from pathlib import Path
@@ -70,25 +71,36 @@ class SpeechInput:
         )
         return " ".join(segment.text.strip() for segment in segments).strip()
 
-    def listen(self, seconds):
+    def listen(self, seconds, *, stop_on_pause=True):
+        import numpy as np
         import sounddevice as sd
-
-        # WAV decoding resamples device-native recordings to Whisper's 16 kHz.
-        import io
-        import wave
+        from faster_whisper.vad import get_speech_timestamps
+        from scipy.signal import resample_poly
 
         try:
             rate = int(sd.query_devices(self.microphone, "input")["default_samplerate"])
-            print(f"Listening for {seconds:g} seconds…", flush=True)
-            audio = sd.rec(round(rate * seconds), samplerate=rate, channels=1, dtype="int16",
-                           device=self.microphone, blocking=True)
+            remaining = round(rate * seconds)
+            block = max(1, round(rate * 0.4))
+            divisor = math.gcd(rate, 16000)
+            samples = []
+            print(f"Listening for up to {seconds:g} seconds…", flush=True)
+            with sd.InputStream(device=self.microphone, samplerate=rate, channels=1,
+                                dtype="float32") as stream:
+                while remaining:
+                    frames = min(block, remaining)
+                    audio, overflowed = stream.read(frames)
+                    if overflowed:
+                        raise AudioCaptureError("The microphone dropped audio.")
+                    samples.append(audio[:, 0])
+                    remaining -= frames
+                    if stop_on_pause or not remaining:
+                        audio = resample_poly(np.concatenate(samples), 16000 // divisor, rate // divisor)
+                    if stop_on_pause and remaining:
+                        speech = get_speech_timestamps(
+                            audio, min_silence_duration_ms=1200, min_speech_duration_ms=100, speech_pad_ms=0,
+                        )
+                        if speech and len(audio) - speech[-1]["end"] >= 19200:
+                            break
         except sd.PortAudioError as error:
             raise AudioCaptureError(str(error)) from error
-        data = io.BytesIO()
-        with wave.open(data, "wb") as wav:
-            wav.setnchannels(1)
-            wav.setsampwidth(2)
-            wav.setframerate(rate)
-            wav.writeframes(audio.astype("<i2", copy=False).tobytes())
-        data.seek(0)
-        return self.transcribe(data)
+        return self.transcribe(audio)

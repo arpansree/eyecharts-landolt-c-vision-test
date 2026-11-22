@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import asdict
 from pathlib import Path
 from report import save_report, validate_session_id
@@ -18,7 +19,7 @@ def main():
     mode.add_argument("--check", action="store_true", help="Test spoken output and read the live starting chart.")
     parser.add_argument("--monitor", type=int, default=1, help="MSS display number, starting at 1.")
     parser.add_argument("--microphone", type=int, help="PortAudio input device number.")
-    parser.add_argument("--listen-seconds", type=float, default=8)
+    parser.add_argument("--listen-seconds", type=float, default=8, help="Maximum seconds to listen for each row answer.")
     parser.add_argument("--start-at", default="20/200", choices=("20/200", "20/50"),
                         help="First scored row in each round. The chart still resets to 20/200.")
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
@@ -76,6 +77,7 @@ def run(args):
             print(json.dumps(asdict(chart)))
             desktop.say("The display check passed. The starting chart is readable.")
             return
+        started = time.monotonic()
         speech = SpeechInput(args.device, args.microphone, args.model_dir)
         test = VisionTest(desktop, speech, args.tesseract, args.listen_seconds)
         try:
@@ -86,6 +88,7 @@ def run(args):
         path = save_report(test.session.results, getattr(args, "session_id", None))
         print(f"Results saved locally to {path}", flush=True)
         desktop.say("The vision test is complete.")
+        print(f"Vision test elapsed time: {time.monotonic() - started:.1f} seconds.", flush=True)
 
 
 if __name__ == "__main__":
