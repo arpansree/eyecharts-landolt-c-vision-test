@@ -1,4 +1,4 @@
-# EyeCharts Vision Test
+# EyeCharts Landolt C Vision Test
 
 The Prev-Hub vision prototype reads a Landolt C chart from EyeCharts and guides the participant by voice. It runs three rounds, both eyes, right eye, and left eye, from 20/200 to 20/20. Each round scores eight rows: 20/200, 20/100, 20/80, 20/50, 20/40, 20/30, 20/25, and 20/20. Whisper large-v3 runs locally.
 
