@@ -35,11 +35,11 @@ Use `--monitor N` if fullscreen EyeCharts is on a display other than display 1. 
 
 1. Set EyeCharts to fullscreen Landolt C with a single row of five symbols, a feet-based Snellen header, and a starting level of 20/200. Keep the chart visible and in the foreground after the operator presses Enter and switches to it.
 2. At the end of BP 1, press Enter to start the timer. Seat the participant six feet away, align their eye height, and set the room lighting. Confirm the setup at the second prompt.
-3. The participant completes the first scored round with both eyes open. They say the five gap directions from left to right and say “skip” for any they cannot see.
+3. The participant completes the first scored round with both eyes open. After each spoken “Speak now” cue, they say the five gap directions from left to right and say “skip” for any they cannot see. The same cue starts recording when the program asks them to say “ready.”
 4. The program resets EyeCharts to a fresh 20/200 row, asks the participant to cover their left eye, and waits for “ready.” It scores the right eye, resets to a fresh 20/200 row, and repeats for the left eye with the right eye covered.
 5. All three rounds run through all 11 levels from 20/200 to 20/20. Three or more correct answers pass a row. A skip is a miss. Unclear answers get up to three repeats before the row is marked unscored. The program checks the next displayed acuity after each advance.
 6. The program reports the smallest passed row and any smaller unscored rows separately for each round. It resets EyeCharts to 20/200 and guides the participant to BP 2. Press Enter in the terminal when BP 2 starts to record the elapsed time.
 
 Camera-based eye-height alignment, chair guidance, and BP device integration are pending hardware interfaces. The operator handles those steps in this build. Licensed EyeCharts Letters mode and the human-scorer comparison remain future work. The workflow keeps chart capture and speech parsing in separate modules to support that adaptation.
 
-To check a saved fullscreen capture without recording any audio or controlling EyeCharts, run `python main.py --image "/path/to/screenshot.png"` from the virtual environment. To check local Whisper inference with a known recording, run `python main.py --audio-file "/path/to/voice.wav"`.
+If a run has trouble starting, run `python main.py --check` from the virtual environment. It plays a spoken prompt and waits up to 75 seconds for a readable starting chart. It leaves the chart on the same row and never opens the microphone. To check a saved screenshot, use `--image "/path/to/screenshot.png"`. To check local Whisper inference with a known recording, use `--audio-file "/path/to/voice.wav"`.

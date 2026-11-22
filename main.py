@@ -15,6 +15,7 @@ def main():
     mode.add_argument("--image", type=Path, help="Read a saved screenshot without starting a session.")
     mode.add_argument("--audio-file", type=Path, help="Check Whisper with an audio file.")
     mode.add_argument("--prepare", action="store_true", help="Download and load Whisper before a session.")
+    mode.add_argument("--check", action="store_true", help="Test spoken output and read the live starting chart.")
     parser.add_argument("--monitor", type=int, default=1, help="MSS display number, starting at 1.")
     parser.add_argument("--microphone", type=int, help="PortAudio input device number.")
     parser.add_argument("--listen-seconds", type=float, default=8)
@@ -65,11 +66,17 @@ def run(args):
     from workflow import VisionTest
 
     desktop = EyeChartsDesktop(args.monitor)
-    with desktop.session():
+    with desktop.session(controls=not args.check):
+        if args.check:
+            chart = VisionTest(desktop, None, args.tesseract, args.listen_seconds).starting_chart()
+            print(json.dumps(asdict(chart)))
+            desktop.say("The display check passed. The starting chart is readable.")
+            return
         speech = SpeechInput(args.device, args.microphone, args.model_dir)
         test = VisionTest(desktop, speech, args.tesseract, args.listen_seconds)
         input("Press Enter when the first BP reading ends. ")
         bp1_end = time.monotonic()
+        desktop.say("Please sit six feet from the screen and look straight ahead while the operator sets up the vision test.")
         input("Seat the participant 6 ft away, align their eye height, and set kiosk lighting. Press Enter when ready. ")
         test.run()
         desktop.say("The vision test is complete. Please proceed to your second blood pressure reading.")

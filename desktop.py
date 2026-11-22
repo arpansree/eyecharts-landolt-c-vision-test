@@ -23,14 +23,14 @@ class EyeChartsDesktop:
             raise ChartError("Live EyeCharts control is supported on macOS and Windows.")
 
     @contextmanager
-    def session(self):
+    def session(self, *, controls=True):
         if self.system == "Darwin":
             import Quartz
 
             if not Quartz.CGPreflightScreenCaptureAccess():
                 Quartz.CGRequestScreenCaptureAccess()
                 raise ChartError("Allow Screen Recording for the launcher in macOS Privacy & Security, then relaunch.")
-            if not Quartz.CGPreflightPostEventAccess():
+            if controls and not Quartz.CGPreflightPostEventAccess():
                 Quartz.CGRequestPostEventAccess()
                 raise ChartError("Allow Accessibility for the launcher in macOS Privacy & Security, then relaunch.")
         with mss.MSS(with_cursor=False) as self.capture:
@@ -41,7 +41,10 @@ class EyeChartsDesktop:
     def foreground(self):
         if self.system == "Darwin":
             from AppKit import NSWorkspace
+            from CoreFoundation import CFRunLoopRunInMode, kCFRunLoopDefaultMode
 
+            # This CLI has no app event loop to deliver focus-change notifications.
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, False)
             app = NSWorkspace.sharedWorkspace().frontmostApplication()
             if app and app.bundleIdentifier() == MAC_BUNDLE_ID:
                 return app.processIdentifier()
@@ -63,25 +66,20 @@ class EyeChartsDesktop:
                 pass
         return None
 
-    def wait_for_focus(self):
+    def open_chart(self):
         if self.system == "Darwin" and self.foreground() is None:
             opened = subprocess.run(["/usr/bin/open", "-b", MAC_BUNDLE_ID], capture_output=True)
             if opened.returncode:
                 print("Could not open EyeCharts automatically. Open it from Applications.", flush=True)
-        print("Keep fullscreen EyeCharts in front on the selected monitor.", flush=True)
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            if self.foreground() is not None:
-                time.sleep(0.6)
-                return
-            time.sleep(0.2)
-        raise ChartError("EyeCharts did not come to the foreground.")
 
     def screenshot(self):
         pid = self.foreground()
         if pid is None:
             raise ChartError("EyeCharts lost focus. Return to the fullscreen chart.")
-        shot = self.capture.grab(self.capture.monitors[self.monitor])
+        try:
+            shot = self.capture.grab(self.capture.monitors[self.monitor])
+        except mss.ScreenShotError as error:
+            raise ChartError(f"Could not capture display {self.monitor}: {error}") from error
         if self.foreground() != pid:
             raise ChartError("The foreground app changed during capture.")
         return np.asarray(Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX").convert("L"))

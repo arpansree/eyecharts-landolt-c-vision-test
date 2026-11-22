@@ -53,8 +53,11 @@ class VisionTest:
         self.listen_seconds = listen_seconds
         self.session = Session()
 
-    def capture(self, expected, *, read_row=True):
-        for _ in range(4):
+    def capture(self, expected, *, read_row=True, startup=False):
+        deadline = time.monotonic() + 75 if startup else None
+        previous_issue = None
+        attempts_remaining = 4
+        while True:
             try:
                 image = self.desktop.screenshot()
                 level = read_acuity(image, self.tesseract)
@@ -63,14 +66,30 @@ class VisionTest:
                 return Chart(level, read_directions(image) if read_row else ())
             except ChartError as error:
                 issue = error
-                time.sleep(0.3)
+                if deadline is not None:
+                    if str(issue) != previous_issue:
+                        print(f"Waiting for the starting chart: {issue}", flush=True)
+                        previous_issue = str(issue)
+                    if time.monotonic() >= deadline:
+                        break
+                else:
+                    attempts_remaining -= 1
+                    if attempts_remaining == 0:
+                        break
+                time.sleep(0.8 if startup else 0.3)
         raise ChartError(f"Could not verify the EyeCharts display. {issue}") from issue
+
+    def starting_chart(self):
+        self.desktop.say("The test will start when the chart is ready. Wait for the words speak now before answering.")
+        self.desktop.open_chart()
+        print("Show fullscreen EyeCharts with five Landolt Cs and 20/200 at the top.", flush=True)
+        return self.capture(LANDOLT_LEVELS[0], startup=True)
 
     def answer(self, row):
         for attempt in range(4):
             message = (
-                "Starting now, say the five gap directions from left to right. Say skip for any you can’t see."
-                if attempt == 0 else "Please repeat the whole row, from left to right, starting now."
+                "Read the five gaps from left to right. Speak now."
+                if attempt == 0 else "Please repeat all five directions, from left to right. Speak now."
             )
             self.desktop.say(message)
             transcript = self.listen(self.listen_seconds)
@@ -95,9 +114,12 @@ class VisionTest:
 
     def ready(self, cover):
         for attempt in range(4):
-            message = f"Cover your {cover} eye with the occluder and say ready." if attempt == 0 else "Please say ready."
+            message = (
+                f"Cover your {cover} eye with the occluder. When you are set, say ready. Speak now."
+                if attempt == 0 else "Please say ready. Speak now."
+            )
             self.desktop.say(message)
-            if words(self.listen(4)) in (["ready"], ["i", "am", "ready"], ["i", "m", "ready"]):
+            if words(self.listen(max(8, self.listen_seconds))) in (["ready"], ["i", "am", "ready"], ["i", "m", "ready"]):
                 return
         raise ChartError("Could not confirm readiness. The next eye was not tested.")
 
@@ -136,9 +158,12 @@ class VisionTest:
         self.desktop.say(f"{label}. {self.session.results[eye]}")
 
     def run(self):
-        self.desktop.wait_for_focus()
-        both = self.capture(LANDOLT_LEVELS[0])
-        self.desktop.say("Keep both eyes open for the first round.")
+        both = self.starting_chart()
+        self.desktop.say(
+            "The vision test is starting. Keep both eyes open. "
+            "For each symbol, say where the opening is: up, down, left, or right. "
+            "Say skip if you can’t tell. Wait for speak now before each row."
+        )
         self.run_round("both", both)
         right = self.reset(both)
         self.ready("left")
