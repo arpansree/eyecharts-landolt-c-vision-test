@@ -38,7 +38,7 @@ On macOS, allow Terminal or Python access to Screen Recording, Accessibility, an
 2. Run `.\.venv\Scripts\python.exe main.py` on Windows or `.venv/bin/python main.py` on macOS.
 3. Leave EyeCharts in front. On Windows, switch back to EyeCharts after launching the program. Say “ready” or “start” once per round. After each “Speak now” cue, say the five gap directions from left to right. Say “skip” for any you can’t see.
 
-EyeCharts resets to 20/200 between rounds. The app announces the round results and keeps individual row scores internal.
+EyeCharts resets to 20/200 between rounds. To protect user privacy, the app keeps scores out of the spoken prompts. The kiosk is where users will review and optionally print their results.
 
 ## Save results
 

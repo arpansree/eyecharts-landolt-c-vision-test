@@ -67,7 +67,7 @@ def run(args):
 
     from desktop import EyeChartsDesktop
     from speech_input import SpeechInput
-    from workflow import VisionTest, summarize
+    from workflow import VisionTest
 
     desktop = EyeChartsDesktop(args.monitor)
     with desktop.session(controls=not args.check):
@@ -83,11 +83,7 @@ def run(args):
         except ChartError:
             desktop.say("The vision test could not continue.")
             raise
-        results = {
-            eye: summarize(rows, "both eyes" if eye == "both" else "this eye", include_unscored=False)
-            for eye, rows in test.session.rows.items()
-        }
-        path = save_report(results, getattr(args, "session_id", None))
+        path = save_report(test.session.results, getattr(args, "session_id", None))
         print(f"Results saved locally to {path}", flush=True)
         desktop.say("The vision test is complete.")
 

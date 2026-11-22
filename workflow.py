@@ -26,21 +26,10 @@ class Session:
     results: dict[str, str] = field(default_factory=dict)
 
 
-def summarize(rows, subject="this eye", *, include_unscored=True):
-    for index in reversed(range(len(rows))):
-        row = rows[index]
+def summarize(rows, subject="this eye"):
+    for row in reversed(rows):
         if row.score is not None and row.score >= 3:
-            if not include_unscored:
-                return row.chart.acuity
-            smaller_unscored = [item.chart.acuity for item in rows[index + 1:] if item.score is None]
-            message = row.chart.acuity + "."
-            if smaller_unscored:
-                levels = ", ".join(smaller_unscored)
-                if len(smaller_unscored) == 1:
-                    message += f" We couldn’t score the {levels} row."
-                else:
-                    message += f" We couldn’t score these rows: {levels}."
-            return message
+            return row.chart.acuity
     if any(row.score is None for row in rows):
         return f"We couldn’t capture a result for {subject} due to a system error."
     return "Below the chart’s tested range."
@@ -171,9 +160,8 @@ class VisionTest:
             row = Row(chart)
             rows.append(row)
             self.answer(row)
-        label, subject = ("Both eyes", "both eyes") if eye == "both" else (f"{eye.capitalize()} eye", "this eye")
+        subject = "both eyes" if eye == "both" else "this eye"
         self.session.results[eye] = summarize(rows, subject)
-        self.desktop.say(f"{label}. {self.session.results[eye]}")
 
     def run(self, *, start_at="20/200"):
         self.desktop.say("It’s time for your vision test.")
