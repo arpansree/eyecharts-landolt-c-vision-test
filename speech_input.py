@@ -1,5 +1,6 @@
 """Transcribe local microphone audio with Whisper large-v3."""
 import re
+from pathlib import Path
 
 TOKEN = re.compile(r"[a-z]+")
 
@@ -23,21 +24,31 @@ def parse_answers(transcript, vocabulary):
 
 
 class SpeechInput:
-    def __init__(self, device, microphone, model_dir):
+    def __init__(self, device, microphone, model_dir, *, prepare=False):
+        import onnxruntime
         from faster_whisper import WhisperModel
+        from faster_whisper.utils import download_model
         from huggingface_hub.errors import LocalEntryNotFoundError
 
+        onnxruntime.disable_telemetry_events()
         print("Loading Whisper large-v3.", flush=True)
-        options = {
-            "device": device,
-            "compute_type": "float16" if device == "cuda" else "int8",
-            "download_root": model_dir,
-        }
         try:
-            self.model = WhisperModel("large-v3", local_files_only=True, **options)
+            model_path = Path(download_model("large-v3", cache_dir=model_dir, local_files_only=True))
         except LocalEntryNotFoundError:
+            model_path = None
+        if model_path is None or not all((model_path / filename).is_file() for filename in (
+            "model.bin", "config.json", "tokenizer.json", "preprocessor_config.json",
+        )):
+            if not prepare:
+                raise RuntimeError("The local Whisper model is missing or incomplete. Run main.py --prepare before testing.")
             print("Downloading the Whisper large-v3 model.", flush=True)
-            self.model = WhisperModel("large-v3", **options)
+            model_path = Path(download_model("large-v3", cache_dir=model_dir))
+        if not (model_path / "tokenizer.json").is_file():
+            raise RuntimeError("The local Whisper tokenizer is missing. Run main.py --prepare again.")
+        self.model = WhisperModel(
+            str(model_path), local_files_only=True, device=device,
+            compute_type="float16" if device == "cuda" else "int8",
+        )
         self.microphone = microphone
 
     def transcribe(self, audio):

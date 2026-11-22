@@ -4,9 +4,9 @@ import json
 import shutil
 import subprocess
 import sys
-import time
 from dataclasses import asdict
 from pathlib import Path
+from report import save_report, validate_session_id
 
 
 def main():
@@ -19,9 +19,13 @@ def main():
     parser.add_argument("--monitor", type=int, default=1, help="MSS display number, starting at 1.")
     parser.add_argument("--microphone", type=int, help="PortAudio input device number.")
     parser.add_argument("--listen-seconds", type=float, default=8)
+    parser.add_argument("--start-at", default="20/200", choices=("20/200", "20/50"),
+                        help="First scored row in each round. The chart still resets to 20/200.")
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument("--model-dir", help="Optional location for the Whisper model cache.")
     parser.add_argument("--tesseract", default="tesseract", help="Tesseract executable or path.")
+    parser.add_argument("--session-id", type=validate_session_id,
+                        help="Save a local results file for this kiosk session ID.")
     args = parser.parse_args()
     if not 2 <= args.listen_seconds <= 30:
         parser.error("--listen-seconds must be between 2 and 30.")
@@ -42,7 +46,7 @@ def run(args):
 
         if args.audio_file and not args.audio_file.is_file():
             raise FileNotFoundError(args.audio_file)
-        speech = SpeechInput(args.device, args.microphone, args.model_dir)
+        speech = SpeechInput(args.device, args.microphone, args.model_dir, prepare=args.prepare)
         if args.audio_file:
             print(speech.transcribe(str(args.audio_file)))
         return
@@ -63,26 +67,31 @@ def run(args):
 
     from desktop import EyeChartsDesktop
     from speech_input import SpeechInput
-    from workflow import VisionTest
+    from workflow import VisionTest, summarize
 
     desktop = EyeChartsDesktop(args.monitor)
     with desktop.session(controls=not args.check):
         if args.check:
-            chart = VisionTest(desktop, None, args.tesseract, args.listen_seconds).starting_chart()
+            chart = VisionTest(desktop, None, args.tesseract, args.listen_seconds).starting_chart(reposition=False)
             print(json.dumps(asdict(chart)))
             desktop.say("The display check passed. The starting chart is readable.")
             return
         speech = SpeechInput(args.device, args.microphone, args.model_dir)
         test = VisionTest(desktop, speech, args.tesseract, args.listen_seconds)
-        input("Press Enter when the first BP reading ends. ")
-        bp1_end = time.monotonic()
-        desktop.say("Please sit six feet from the screen and look straight ahead while the operator sets up the vision test.")
-        input("Seat the participant 6 ft away, align their eye height, and set kiosk lighting. Press Enter when ready. ")
-        test.run()
-        desktop.say("The vision test is complete. Please proceed to your second blood pressure reading.")
-        input("Operator: return to this terminal and press Enter when the second BP reading starts. ")
-        test.session.bp_interval_seconds = time.monotonic() - bp1_end
-        print(f"BP 1 end to BP 2 start: {test.session.bp_interval_seconds:.1f} seconds.")
+        try:
+            test.run(start_at=args.start_at)
+        except ChartError:
+            desktop.say("The vision test could not continue.")
+            raise
+        session_id = getattr(args, "session_id", None)
+        if session_id is not None:
+            results = {
+                eye: summarize(rows, "both eyes" if eye == "both" else "this eye", include_unscored=False)
+                for eye, rows in test.session.rows.items()
+            }
+            path = save_report(results, session_id)
+            print(f"Results saved locally to {path}", flush=True)
+        desktop.say("The vision test is complete.")
 
 
 if __name__ == "__main__":

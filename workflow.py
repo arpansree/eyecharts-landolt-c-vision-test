@@ -24,13 +24,14 @@ class Row:
 class Session:
     rows: dict[str, list[Row]] = field(default_factory=dict)
     results: dict[str, str] = field(default_factory=dict)
-    bp_interval_seconds: float | None = None
 
 
-def summarize(rows, subject="this eye"):
+def summarize(rows, subject="this eye", *, include_unscored=True):
     for index in reversed(range(len(rows))):
         row = rows[index]
         if row.score is not None and row.score >= 3:
+            if not include_unscored:
+                return row.chart.acuity
             smaller_unscored = [item.chart.acuity for item in rows[index + 1:] if item.score is None]
             message = row.chart.acuity + "."
             if smaller_unscored:
@@ -61,7 +62,7 @@ class VisionTest:
             try:
                 image = self.desktop.screenshot()
                 level = read_acuity(image, self.tesseract)
-                if level != expected:
+                if expected is not None and level != expected:
                     raise ChartError(f"Expected acuity {expected}, but the screen showed {level}.")
                 if not read_row:
                     return Chart(level, ())
@@ -84,11 +85,17 @@ class VisionTest:
                 time.sleep(0.8 if startup else 0.3)
         raise ChartError(f"Could not verify the EyeCharts display. {issue}") from issue
 
-    def starting_chart(self):
-        self.desktop.say("The test will start when the chart is ready. Wait for the words speak now before answering.")
+    def starting_chart(self, *, reposition=True):
         self.desktop.open_chart()
-        print("Show fullscreen EyeCharts with five Landolt Cs and 20/200 at the top.", flush=True)
-        return self.capture(LANDOLT_LEVELS[0], startup=True)
+        first = LANDOLT_LEVELS[0]
+        if reposition:
+            chart = self.capture(None, read_row=False, startup=True)
+            if chart.acuity not in LANDOLT_LEVELS:
+                raise ChartError(f"EyeCharts showed {chart.acuity}, outside the supported startup range.")
+            for level in reversed(LANDOLT_LEVELS[:LANDOLT_LEVELS.index(chart.acuity)]):
+                self.desktop.step(smaller=False)
+                self.capture(level, read_row=False)
+        return self.capture(first, startup=not reposition)
 
     def answer(self, row):
         for attempt in range(4):
@@ -106,7 +113,6 @@ class VisionTest:
                 row.matches = tuple(actual == expected for actual, expected in zip(
                     row.answers, row.chart.directions, strict=True
                 ))
-                self.desktop.say(f"{row.score} out of 5.")
                 return
         self.desktop.say("We couldn’t score that response.")
 
@@ -117,16 +123,19 @@ class VisionTest:
             print(f"Microphone capture failed: {error}", flush=True)
             return ""
 
-    def ready(self, cover):
+    def wait_for_start(self, instruction, seconds):
+        accepted = (["ready"], ["start"], ["i", "am", "ready"], ["i", "m", "ready"])
         for attempt in range(4):
-            message = (
-                f"Cover your {cover} eye with the occluder. When you are set, say ready. Speak now."
-                if attempt == 0 else "Please say ready. Speak now."
-            )
-            self.desktop.say(message)
-            if words(self.listen(max(8, self.listen_seconds))) in (["ready"], ["i", "am", "ready"], ["i", "m", "ready"]):
-                return
-        raise ChartError("Could not confirm readiness. The next eye was not tested.")
+            message = instruction if attempt == 0 else "Please say ready or start."
+            self.desktop.say(f"{message} Speak now.")
+            if words(self.listen(seconds)) in accepted:
+                return True
+        return False
+
+    def ready(self, cover):
+        instruction = f"Cover your {cover} eye with the occluder. When you are ready, say the words, ready, or start."
+        if not self.wait_for_start(instruction, max(8, self.listen_seconds)):
+            raise ChartError("Could not confirm readiness. The next eye was not tested.")
 
     def reset(self, previous_start):
         for level in reversed(LANDOLT_LEVELS[:-1]):
@@ -144,17 +153,21 @@ class VisionTest:
             raise ChartError("EyeCharts kept showing the previous 20/200 sequence after reset.")
         return chart
 
-    def run_round(self, eye, start):
+    def run_round(self, eye, start, start_at):
         rows = self.session.rows[eye] = []
-        chart = start
-        for index, level in enumerate(LANDOLT_LEVELS):
+        chart = self.capture(LANDOLT_LEVELS[0])
+        if chart != start:
+            raise ChartError("The starting row changed after reset.")
+        first = LANDOLT_LEVELS.index(start_at)
+        for level in LANDOLT_LEVELS[1:first + 1]:
+            self.desktop.step(smaller=True)
+            chart = self.capture(level, read_row=level == start_at)
+        for index, level in enumerate(LANDOLT_LEVELS[first:]):
             if index:
                 if self.capture(chart.acuity) != chart:
                     raise ChartError("The EyeCharts row changed before advance.")
                 self.desktop.step(smaller=True)
-            chart = self.capture(level)
-            if index == 0 and chart != start:
-                raise ChartError("The starting row changed after reset.")
+                chart = self.capture(level)
             row = Row(chart)
             rows.append(row)
             self.answer(row)
@@ -162,18 +175,23 @@ class VisionTest:
         self.session.results[eye] = summarize(rows, subject)
         self.desktop.say(f"{label}. {self.session.results[eye]}")
 
-    def run(self):
+    def run(self, *, start_at="20/200"):
+        self.desktop.say("It’s time for your vision test.")
         both = self.starting_chart()
         self.desktop.say(
-            "The vision test is starting. Keep both eyes open. "
+            "Keep both eyes open. "
             "For each symbol, say where the opening is: up, down, left, or right. "
-            "Say skip if you can’t tell. Wait for speak now before each row."
+            "Say skip if you can’t tell. Wait for the speak now cue before giving your directions."
         )
-        self.run_round("both", both)
+        if not self.wait_for_start("To begin the both eyes round, say ready or start.", max(8, self.listen_seconds)):
+            raise ChartError("Could not confirm readiness. The both-eyes round did not start.")
+        self.run_round("both", both, start_at)
         right = self.reset(both)
+        self.desktop.say("The chart has reset to twenty over two hundred for the right eye.")
         self.ready("left")
-        self.run_round("right", right)
+        self.run_round("right", right, start_at)
         left = self.reset(right)
+        self.desktop.say("The chart has reset to twenty over two hundred for the left eye.")
         self.ready("right")
-        self.run_round("left", left)
+        self.run_round("left", left, start_at)
         self.reset(left)
