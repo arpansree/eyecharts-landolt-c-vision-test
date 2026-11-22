@@ -36,7 +36,7 @@ On macOS, allow Terminal or Python access to Screen Recording, Accessibility, an
 
 1. **Before running the program, open EyeCharts and set the chart to 20/200.** Use fullscreen Landolt C with five symbols per row and the feet-based acuity label.
 2. Run `.\.venv\Scripts\python.exe main.py` on Windows or `.venv/bin/python main.py` on macOS.
-3. Leave EyeCharts in front. On Windows, switch back to EyeCharts after launching the program. Say “ready” or “start” once per round. The first row gives full instructions. Later rows say “Next row. Speak now.” Say the five gap directions from left to right, using “skip” for any you can’t see.
+3. Leave EyeCharts in front. On Windows, switch back to EyeCharts after launching the program. Say “ready” or “start” once per round. Full instructions play once, at the start of the both-eyes round. Give one answer for each of the five symbols, from left to right. Say “skip” for any symbol you can’t identify.
 
 EyeCharts resets to 20/200 between rounds. To protect user privacy, the app keeps scores out of the spoken prompts. The kiosk is where users will review and optionally print their results.
 

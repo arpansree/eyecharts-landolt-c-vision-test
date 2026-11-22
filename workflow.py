@@ -87,17 +87,15 @@ class VisionTest:
                 self.capture(level, read_row=False)
         return self.capture(first, startup=not reposition)
 
-    def answer(self, row, *, first_row):
+    def answer(self, row, *, prompt):
         for attempt in range(4):
             if attempt:
-                message = "Please repeat all five directions from left to right. Speak now."
-            elif first_row:
                 message = (
-                    "Look at the five symbols. Starting on the left, say which way each gap opens: "
-                    "up, down, left, or right. If you can’t tell, say ‘skip.’ Speak now."
+                    "We couldn’t quite get that, please repeat by giving one answer for each of the five symbols, "
+                    "from left to right. Say skip for any you can’t tell. Speak now."
                 )
             else:
-                message = "Next row. Speak now."
+                message = prompt
             self.desktop.say(message)
             transcript = self.listen(self.listen_seconds, stop_on_pause=attempt == 0)
             row.transcripts.append(transcript)
@@ -109,7 +107,10 @@ class VisionTest:
                     row.answers, row.chart.directions, strict=True
                 ))
                 return
-        self.desktop.say("We couldn’t score that response.")
+        message = "We couldn’t score that row."
+        if row.chart.acuity != SCORED_LEVELS[-1]:
+            message += " Let’s move on to the next row."
+        self.desktop.say(message)
 
     def listen(self, seconds, *, stop_on_pause=True):
         try:
@@ -122,7 +123,7 @@ class VisionTest:
         accepted = (["ready"], ["start"], ["i", "am", "ready"], ["i", "m", "ready"])
         for attempt in range(4):
             message = instruction if attempt == 0 else "Please say ready or start."
-            self.desktop.say(f"{message} Speak now.")
+            self.desktop.say(message)
             if words(self.listen(seconds)) in accepted:
                 return True
         return False
@@ -150,6 +151,13 @@ class VisionTest:
 
     def run_round(self, eye, start, start_at):
         rows = self.session.rows[eye] = []
+        first_prompt = "First row. Speak now."
+        if eye == "both":
+            first_prompt = (
+                "Look at the five symbols. Starting on the left, say which way each gap opens: "
+                "up, down, left, or right. If you can’t tell, say skip for that symbol. "
+                "Give one answer for each of the five symbols. Speak now."
+            )
         chart = self.capture(LANDOLT_LEVELS[0])
         if chart != start:
             raise ChartError("The starting row changed after reset.")
@@ -162,8 +170,9 @@ class VisionTest:
             if not scored:
                 continue
             row = Row(chart)
+            prompt = "Next row. Speak now." if rows else first_prompt
             rows.append(row)
-            self.answer(row, first_row=len(rows) == 1)
+            self.answer(row, prompt=prompt)
         subject = "both eyes" if eye == "both" else "this eye"
         self.session.results[eye] = summarize(rows, subject)
 
@@ -175,11 +184,11 @@ class VisionTest:
             raise ChartError("Could not confirm readiness. The both-eyes round did not start.")
         self.run_round("both", both, start_at)
         right = self.reset(both)
-        self.desktop.say("The chart has reset to twenty over two hundred for the right eye.")
+        self.desktop.say("We’re ready for the next eye.")
         self.ready("left")
         self.run_round("right", right, start_at)
         left = self.reset(right)
-        self.desktop.say("The chart has reset to twenty over two hundred for the left eye.")
+        self.desktop.say("We’re ready for the next eye.")
         self.ready("right")
         self.run_round("left", left, start_at)
         self.reset(left)
