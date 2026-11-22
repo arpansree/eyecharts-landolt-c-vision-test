@@ -26,6 +26,7 @@ class EyeChartsDesktop:
     def session(self, *, controls=True):
         if self.system == "Darwin":
             import Quartz
+            from mss import darwin
 
             if not Quartz.CGPreflightScreenCaptureAccess():
                 Quartz.CGRequestScreenCaptureAccess()
@@ -33,6 +34,12 @@ class EyeChartsDesktop:
             if controls and not Quartz.CGPreflightPostEventAccess():
                 Quartz.CGRequestPostEventAccess()
                 raise ChartError("Allow Accessibility for the launcher in macOS Privacy & Security, then relaunch.")
+            # MSS defaults to logical pixels, losing Retina detail in the smallest gaps.
+            darwin.IMAGE_OPTIONS = (
+                Quartz.kCGWindowImageBoundsIgnoreFraming
+                | Quartz.kCGWindowImageShouldBeOpaque
+                | Quartz.kCGWindowImageBestResolution
+            )
         with mss.MSS(with_cursor=False) as self.capture:
             if not 1 <= self.monitor < len(self.capture.monitors):
                 raise ChartError(f"Display {self.monitor} is unavailable.")

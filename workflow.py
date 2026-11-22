@@ -63,7 +63,12 @@ class VisionTest:
                 level = read_acuity(image, self.tesseract)
                 if level != expected:
                     raise ChartError(f"Expected acuity {expected}, but the screen showed {level}.")
-                return Chart(level, read_directions(image) if read_row else ())
+                if not read_row:
+                    return Chart(level, ())
+                try:
+                    return Chart(level, read_directions(image))
+                except ChartError as error:
+                    raise ChartError(f"Could not read all five gaps at {level}: {error}") from error
             except ChartError as error:
                 issue = error
                 if deadline is not None:
