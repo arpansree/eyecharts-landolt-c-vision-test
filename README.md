@@ -42,12 +42,12 @@ EyeCharts resets to 20/200 between rounds. The app announces the round results a
 
 ## Save results
 
-Add `--session-id demo-1` to the run command to save `vision-demo-1.txt` with the three acuity results. Use a new ID for each visit and leave personal details out of the ID.
+Every completed test automatically saves a local `.txt` file with the three acuity results. The terminal shows the filename and path.
 
 - **Windows** — `%LOCALAPPDATA%\EyeCharts Vision Test\Reports`
 - **macOS** — `~/Library/Application Support/EyeCharts Vision Test/Reports`
 
-The app keeps audio, screenshots, and individual answers in memory. The hub will handle review, optional printing, and deletion of the results file when the visit ends.
+The kiosk can pass `--session-id demo-1` to save the results as `vision-demo-1.txt`. Use a unique ID without personal details for each visit. The app keeps audio, screenshots, and individual answers in memory. The hub will handle review, optional printing, and deletion of the results file when the visit ends.
 
 ## Troubleshooting
 

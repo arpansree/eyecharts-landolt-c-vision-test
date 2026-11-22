@@ -1,9 +1,10 @@
-"""Write an optional local handoff for a completed vision session."""
+"""Write a local handoff for a completed vision session."""
 import os
 import platform
 import re
 import tempfile
 from pathlib import Path
+from uuid import uuid4
 
 ROUND_LABELS = {"both": "Both eyes", "right": "Right eye", "left": "Left eye"}
 SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
@@ -24,9 +25,10 @@ def report_directory():
     return root / "EyeCharts Vision Test" / "Reports"
 
 
-def save_report(results, session_id):
-    """Atomically write the three results for the kiosk's session."""
-    path = report_directory() / f"vision-{validate_session_id(session_id)}.txt"
+def save_report(results, session_id=None):
+    """Atomically write the three results using a supplied or generated session ID."""
+    identifier = uuid4().hex if session_id is None else validate_session_id(session_id)
+    path = report_directory() / f"vision-{identifier}.txt"
     text = "".join(f"{label}: {results[key].removesuffix('.')}\n" for key, label in ROUND_LABELS.items())
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     descriptor, temporary = tempfile.mkstemp(prefix=".vision-", dir=path.parent)
