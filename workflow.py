@@ -164,7 +164,7 @@ class VisionTest:
         self.session.results[eye] = summarize(rows, subject)
 
     def run(self, *, start_at="20/200"):
-        self.desktop.say("It’s time for your vision test.")
+        self.desktop.say("It’s time for the vision test.")
         both = self.starting_chart()
         self.desktop.say(
             "Keep both eyes open. "

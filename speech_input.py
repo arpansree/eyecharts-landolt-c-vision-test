@@ -1,5 +1,7 @@
 """Transcribe local microphone audio with Whisper large-v3."""
+import logging
 import re
+import sys
 from pathlib import Path
 
 TOKEN = re.compile(r"[a-z]+")
@@ -25,6 +27,7 @@ def parse_answers(transcript, vocabulary):
 
 class SpeechInput:
     def __init__(self, device, microphone, model_dir, *, prepare=False):
+        import ctranslate2
         import onnxruntime
         from faster_whisper import WhisperModel
         from faster_whisper.utils import download_model
@@ -45,10 +48,19 @@ class SpeechInput:
             model_path = Path(download_model("large-v3", cache_dir=model_dir))
         if not (model_path / "tokenizer.json").is_file():
             raise RuntimeError("The local Whisper tokenizer is missing. Run main.py --prepare again.")
-        self.model = WhisperModel(
-            str(model_path), local_files_only=True, device=device,
-            compute_type="float16" if device == "cuda" else "int8",
-        )
+        log_level = ctranslate2.get_log_level()
+        quiet_startup = sys.platform == "darwin" and device == "cpu" and log_level < logging.ERROR
+        if quiet_startup:
+            # The CPU model emits an experimental MPS recommendation on Apple silicon.
+            ctranslate2.set_log_level(logging.ERROR)
+        try:
+            self.model = WhisperModel(
+                str(model_path), local_files_only=True, device=device,
+                compute_type="float16" if device == "cuda" else "int8",
+            )
+        finally:
+            if quiet_startup:
+                ctranslate2.set_log_level(log_level)
         self.microphone = microphone
 
     def transcribe(self, audio):
