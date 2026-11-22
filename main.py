@@ -12,6 +12,7 @@ from report import save_report, validate_session_id
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    # these are separate checks, so pick just one or leave them off for a full test
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--image", type=Path, help="Read a saved screenshot without starting a session.")
     mode.add_argument("--audio-file", type=Path, help="Check Whisper with an audio file.")
@@ -42,6 +43,7 @@ def main():
 
 
 def run(args):
+    # the audio checks don't need EyeCharts or screen recording
     if args.prepare or args.audio_file:
         from speech_input import SpeechInput
 
@@ -81,11 +83,13 @@ def run(args):
         speech = SpeechInput(args.device, args.microphone, args.model_dir)
         test = VisionTest(desktop, speech, args.tesseract, args.listen_seconds)
         try:
+            # get the mic ready before the app asks the person to say anything
             with speech.microphone_session():
                 test.run(start_at=args.start_at)
         except ChartError:
             desktop.say("The vision test could not continue.")
             raise
+        # save the three round results so the kiosk can pick them up later
         path = save_report(test.session.results, getattr(args, "session_id", None))
         print(f"Results saved locally to {path}", flush=True)
         desktop.say("The vision test is complete.")

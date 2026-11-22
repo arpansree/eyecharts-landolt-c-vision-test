@@ -11,6 +11,7 @@ SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 
 
 def validate_session_id(value):
+    # this goes in a filename, so keep out spaces, slashes, and other punctuation
     if not SESSION_ID.fullmatch(value):
         raise ValueError("Use 1–64 letters, digits, underscores, or hyphens, starting with a letter or digit.")
     return value
@@ -31,6 +32,7 @@ def save_report(results, session_id=None):
     path = report_directory() / f"vision-{identifier}.txt"
     text = "".join(f"{label}: {results[key].removesuffix('.')}\n" for key, label in ROUND_LABELS.items())
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # write it first, then rename it so the kiosk never reads a half-written report
     descriptor, temporary = tempfile.mkstemp(prefix=".vision-", dir=path.parent)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as output:

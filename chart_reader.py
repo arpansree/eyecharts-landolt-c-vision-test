@@ -26,7 +26,7 @@ class Chart:
 def read_acuity(gray, tesseract):
     height, width = gray.shape
     header = gray[:round(height * 0.18), width // 4:width * 3 // 4]
-    # Per-row background removal discards the edge of the black header bar.
+    # find the background on each line so the edge of the header bar gets ignored
     background = np.median(header, axis=1).astype(np.int16)
     ink = (np.abs(header.astype(np.int16) - background[:, None]) >= 65).astype(np.uint8)
     bounds = Image.fromarray(ink).getbbox()
@@ -59,6 +59,7 @@ def classify_glyph(component, contrast):
     padding = 2
     component = np.pad(component, padding)
     y, x = np.indices(component.shape, dtype=float)
+    # measure from the center relative to the symbol's size so we can compare different sized rows
     x = (x - padding - (width - 1) / 2) / size
     y = (y - padding - (height - 1) / 2) / size
     radius_squared = x * x + y * y
@@ -69,6 +70,7 @@ def classify_glyph(component, contrast):
         template = ring & ~gap
         overlap = np.count_nonzero(component & template)
         union = np.count_nonzero(component | template)
+        # count how much of the combined shape the two images actually share
         scores.append((overlap / union, direction))
     scores.sort(reverse=True)
     if scores[0][0] >= 0.61 and scores[0][0] - scores[1][0] >= 0.06:
@@ -76,8 +78,7 @@ def classify_glyph(component, contrast):
     if scores[0][0] < 0.60:
         return None
 
-    # A narrow gap may be visible in antialiasing even if the thresholded
-    # component fills it. Compare lightness at the four ends of the ring.
+    # sometimes the tiny gap gets lost in black and white, but we can still see it in the gray pixels
     contrast = np.pad(contrast.astype(float), padding)
     contrast /= contrast.max()
     ink = []
@@ -112,6 +113,7 @@ def read_directions(gray):
         direction = classify_glyph(labels[vertical, horizontal] == label, contrast[vertical, horizontal])
         if direction:
             glyphs.append((x + w / 2, y + h / 2, size, direction))
+    # sort by x position so the answers line up with how the person reads them
     glyphs.sort()
     if len(glyphs) != 5:
         raise ChartError(f"Expected one row of five Landolt Cs. Found {len(glyphs)} candidates.")

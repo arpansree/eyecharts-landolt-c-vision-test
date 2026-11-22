@@ -22,7 +22,7 @@ def words(transcript):
 
 def parse_answers(transcript, vocabulary):
     tokens = words(transcript)
-    # Whisper may add a conjunction before the last answer.
+    # Whisper might put an "and" before the last answer, which is fine
     if len(tokens) == 6 and tokens[-2] == "and":
         tokens.pop(-2)
     if len(tokens) == 5 and all(token in vocabulary or token == "skip" for token in tokens):
@@ -40,6 +40,7 @@ class SpeechInput:
 
         onnxruntime.disable_telemetry_events()
         print("Loading Whisper large-v3.", flush=True)
+        # a live test uses the cached model. only --prepare can download it
         try:
             model_path = Path(download_model("large-v3", cache_dir=model_dir, local_files_only=True))
         except LocalEntryNotFoundError:
@@ -56,7 +57,7 @@ class SpeechInput:
         log_level = ctranslate2.get_log_level()
         quiet_startup = sys.platform == "darwin" and device == "cpu" and log_level < logging.ERROR
         if quiet_startup:
-            # The CPU model emits an experimental MPS recommendation on Apple silicon.
+            # hide the experimental MPS tip during Mac startup without hiding errors
             ctranslate2.set_log_level(logging.ERROR)
         try:
             self.model = WhisperModel(
@@ -87,7 +88,7 @@ class SpeechInput:
             rate = int(sd.query_devices(self.microphone, "input")["default_samplerate"])
             with closing(sd.InputStream(device=self.microphone, samplerate=rate, channels=1,
                                         dtype="float32")) as stream:
-                # Initialize the OS input path before speaking. Discard its buffer.
+                # warm up the mic now so we don't miss the first "ready". discard the setup audio
                 stream.start()
                 stream.abort()
                 self._stream = stream
@@ -124,6 +125,7 @@ class SpeechInput:
                     if stop_on_pause or not remaining:
                         audio = resample_poly(np.concatenate(samples), 16000 // divisor, rate // divisor)
                     if stop_on_pause and remaining:
+                        # once we hear speech followed by a pause, we can stop listening early
                         speech = get_speech_timestamps(
                             audio, min_silence_duration_ms=1200, min_speech_duration_ms=100, speech_pad_ms=0,
                         )

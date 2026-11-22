@@ -6,6 +6,7 @@ from chart_reader import Chart, ChartError, DIRECTIONS, read_acuity, read_direct
 from speech_input import AudioCaptureError, parse_answers, words
 
 LANDOLT_LEVELS = tuple(f"20/{value}" for value in (200, 160, 125, 100, 80, 60, 50, 40, 30, 25, 20))
+# EyeCharts still moves through every level, but these are the ones we ask about
 SCORED_LEVELS = ("20/200", "20/100", "20/80", "20/50", "20/40", "20/30", "20/25", "20/20")
 
 
@@ -18,6 +19,7 @@ class Row:
 
     @property
     def score(self):
+        # 0 means we got an answer and nothing matched. None means we couldn't score it
         return None if self.matches is None else sum(self.matches)
 
 
@@ -28,6 +30,7 @@ class Session:
 
 
 def summarize(rows, subject="this eye"):
+    # start with the smallest row and work back until we find one they passed
     for row in reversed(rows):
         if row.score is not None and row.score >= 3:
             return row.chart.acuity
@@ -45,6 +48,7 @@ class VisionTest:
         self.session = Session()
 
     def capture(self, expected, *, read_row=True, startup=False):
+        # give EyeCharts extra time at startup, when it might still be opening
         deadline = time.monotonic() + 75 if startup else None
         previous_issue = None
         attempts_remaining = 4
@@ -97,8 +101,10 @@ class VisionTest:
             else:
                 message = prompt
             self.desktop.say(message)
+            # if they paused too long the first time, give them the whole window on a retry
             transcript = self.listen(self.listen_seconds, stop_on_pause=attempt == 0)
             row.transcripts.append(transcript)
+            # make sure we're scoring against the row they actually saw
             if self.capture(row.chart.acuity) != row.chart:
                 raise ChartError("The EyeCharts row changed while the participant was answering.")
             row.answers = parse_answers(transcript, DIRECTIONS)
@@ -137,7 +143,7 @@ class VisionTest:
         for level in reversed(LANDOLT_LEVELS[:-1]):
             self.desktop.step(smaller=False)
             chart = self.capture(level, read_row=level == LANDOLT_LEVELS[0])
-        # EyeCharts can randomly repeat a sequence. Give it another chance.
+        # sometimes EyeCharts comes back with the same row, so move away and try again
         for _ in range(4):
             if chart != previous_start:
                 return chart
@@ -152,6 +158,7 @@ class VisionTest:
     def run_round(self, eye, start, start_at):
         rows = self.session.rows[eye] = []
         first_prompt = "First row. Speak now."
+        # explain how to answer once, on the first row with both eyes open
         if eye == "both":
             first_prompt = (
                 "Look at the five symbols. Starting on the left, say which way each gap opens: "

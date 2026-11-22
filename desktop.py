@@ -34,7 +34,7 @@ class EyeChartsDesktop:
             if controls and not Quartz.CGPreflightPostEventAccess():
                 Quartz.CGRequestPostEventAccess()
                 raise ChartError("Allow Accessibility for the launcher in macOS Privacy & Security, then relaunch.")
-            # MSS defaults to logical pixels, losing Retina detail in the smallest gaps.
+            # use the full Retina resolution so the gaps on the tiny rows don't get lost
             darwin.IMAGE_OPTIONS = (
                 Quartz.kCGWindowImageBoundsIgnoreFraming
                 | Quartz.kCGWindowImageShouldBeOpaque
@@ -50,7 +50,7 @@ class EyeChartsDesktop:
             from AppKit import NSWorkspace
             from CoreFoundation import CFRunLoopRunInMode, kCFRunLoopDefaultMode
 
-            # This CLI has no app event loop to deliver focus-change notifications.
+            # give macOS a moment to report any change in which app is in front
             CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, False)
             app = NSWorkspace.sharedWorkspace().frontmostApplication()
             if app and app.bundleIdentifier() == MAC_BUNDLE_ID:
@@ -87,11 +87,13 @@ class EyeChartsDesktop:
             shot = self.capture.grab(self.capture.monitors[self.monitor])
         except mss.ScreenShotError as error:
             raise ChartError(f"Could not capture display {self.monitor}: {error}") from error
+        # if they switched apps during the screenshot, don't try to read it
         if self.foreground() != pid:
             raise ChartError("The foreground app changed during capture.")
         return np.asarray(Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX").convert("L"))
 
     def step(self, smaller):
+        # check focus before sending an arrow key so it goes to EyeCharts
         pid = self.foreground()
         if pid is None:
             raise ChartError("EyeCharts lost focus. No advance key was sent.")
@@ -126,4 +128,5 @@ class EyeChartsDesktop:
                 f"$speaker.Speak('{text}')",
             ]
             options = {"creationflags": subprocess.CREATE_NO_WINDOW}
+        # wait for the cue to finish so the mic doesn't pick up the app's own voice
         subprocess.run(command, check=True, timeout=30, **options)
