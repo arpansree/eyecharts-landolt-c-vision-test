@@ -3,7 +3,11 @@ import logging
 import math
 import re
 import sys
+from contextlib import closing, contextmanager
 from pathlib import Path
+
+import numpy as np
+from scipy.signal import resample_poly
 
 TOKEN = re.compile(r"[a-z]+")
 
@@ -63,6 +67,7 @@ class SpeechInput:
             if quiet_startup:
                 ctranslate2.set_log_level(log_level)
         self.microphone = microphone
+        self._stream = None
 
     def transcribe(self, audio):
         segments, _ = self.model.transcribe(
@@ -71,21 +76,44 @@ class SpeechInput:
         )
         return " ".join(segment.text.strip() for segment in segments).strip()
 
-    def listen(self, seconds, *, stop_on_pause=True):
-        import numpy as np
+    @contextmanager
+    def microphone_session(self):
         import sounddevice as sd
-        from faster_whisper.vad import get_speech_timestamps
-        from scipy.signal import resample_poly
+        from faster_whisper.vad import get_vad_model
 
+        print("Preparing microphone…", flush=True)
+        get_vad_model()
         try:
             rate = int(sd.query_devices(self.microphone, "input")["default_samplerate"])
+            with closing(sd.InputStream(device=self.microphone, samplerate=rate, channels=1,
+                                        dtype="float32")) as stream:
+                # Initialize the OS input path before speaking. Discard its buffer.
+                stream.start()
+                stream.abort()
+                self._stream = stream
+                try:
+                    yield
+                finally:
+                    self._stream = None
+        except sd.PortAudioError as error:
+            raise AudioCaptureError(f"Could not initialize the microphone: {error}") from error
+
+    def listen(self, seconds, *, stop_on_pause=True):
+        import sounddevice as sd
+        from faster_whisper.vad import get_speech_timestamps
+
+        stream = self._stream
+        if stream is None:
+            raise AudioCaptureError("The microphone has not been prepared.")
+        try:
+            rate = int(stream.samplerate)
             remaining = round(rate * seconds)
             block = max(1, round(rate * 0.4))
             divisor = math.gcd(rate, 16000)
             samples = []
             print(f"Listening for up to {seconds:g} seconds…", flush=True)
-            with sd.InputStream(device=self.microphone, samplerate=rate, channels=1,
-                                dtype="float32") as stream:
+            stream.start()
+            try:
                 while remaining:
                     frames = min(block, remaining)
                     audio, overflowed = stream.read(frames)
@@ -101,6 +129,8 @@ class SpeechInput:
                         )
                         if speech and len(audio) - speech[-1]["end"] >= 19200:
                             break
+            finally:
+                stream.abort()
         except sd.PortAudioError as error:
             raise AudioCaptureError(str(error)) from error
         return self.transcribe(audio)

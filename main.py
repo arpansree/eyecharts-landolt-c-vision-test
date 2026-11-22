@@ -81,7 +81,8 @@ def run(args):
         speech = SpeechInput(args.device, args.microphone, args.model_dir)
         test = VisionTest(desktop, speech, args.tesseract, args.listen_seconds)
         try:
-            test.run(start_at=args.start_at)
+            with speech.microphone_session():
+                test.run(start_at=args.start_at)
         except ChartError:
             desktop.say("The vision test could not continue.")
             raise
