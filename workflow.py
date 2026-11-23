@@ -102,7 +102,10 @@ class VisionTest:
                 message = prompt
             self.desktop.say(message)
             # if they paused too long the first time, give them the whole window on a retry
-            transcript = self.listen(self.listen_seconds, stop_on_pause=attempt == 0)
+            transcript = self.listen(
+                self.listen_seconds, stop_on_pause=attempt == 0,
+                accept_early=lambda text: parse_answers(text, DIRECTIONS) is not None,
+            )
             row.transcripts.append(transcript)
             # make sure we're scoring against the row they actually saw
             if self.capture(row.chart.acuity) != row.chart:
@@ -118,9 +121,12 @@ class VisionTest:
             message += " Let’s move on to the next row."
         self.desktop.say(message)
 
-    def listen(self, seconds, *, stop_on_pause=True):
+    def listen(self, seconds, *, stop_on_pause=True, accept_early=None, pause_seconds=1.2):
         try:
-            return self.speech.listen(seconds, stop_on_pause=stop_on_pause)
+            return self.speech.listen(
+                seconds, stop_on_pause=stop_on_pause, accept_early=accept_early,
+                pause_seconds=pause_seconds,
+            )
         except AudioCaptureError as error:
             print(f"Microphone capture failed: {error}", flush=True)
             return ""
@@ -130,7 +136,8 @@ class VisionTest:
         for attempt in range(4):
             message = instruction if attempt == 0 else "Please say ready or start."
             self.desktop.say(message)
-            if words(self.listen(seconds)) in accepted:
+            # a short command doesn't need the longer pause we allow between row answers
+            if words(self.listen(seconds, pause_seconds=0.4)) in accepted:
                 return True
         return False
 
