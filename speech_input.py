@@ -3,6 +3,7 @@ import logging
 import math
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
 from pathlib import Path
 
@@ -10,6 +11,8 @@ import numpy as np
 from scipy.signal import resample_poly
 
 TOKEN = re.compile(r"[a-z]+")
+SPEECH_RATE = 16000
+DECODE_PAUSE = 6400
 
 
 class AudioCaptureError(RuntimeError):
@@ -99,40 +102,73 @@ class SpeechInput:
         except sd.PortAudioError as error:
             raise AudioCaptureError(f"Could not initialize the microphone: {error}") from error
 
-    def listen(self, seconds, *, stop_on_pause=True):
+    def listen(self, seconds, *, stop_on_pause=True, accept_early=None, pause_seconds=1.2):
         import sounddevice as sd
         from faster_whisper.vad import get_speech_timestamps
 
         stream = self._stream
         if stream is None:
             raise AudioCaptureError("The microphone has not been prepared.")
-        try:
-            rate = int(stream.samplerate)
-            remaining = round(rate * seconds)
-            block = max(1, round(rate * 0.4))
-            divisor = math.gcd(rate, 16000)
-            samples = []
-            print(f"Listening for up to {seconds:g} seconds…", flush=True)
-            stream.start()
+        with ThreadPoolExecutor(max_workers=1) as decoder:
             try:
-                while remaining:
-                    frames = min(block, remaining)
-                    audio, overflowed = stream.read(frames)
-                    if overflowed:
-                        raise AudioCaptureError("The microphone dropped audio.")
-                    samples.append(audio[:, 0])
-                    remaining -= frames
-                    if stop_on_pause or not remaining:
-                        audio = resample_poly(np.concatenate(samples), 16000 // divisor, rate // divisor)
-                    if stop_on_pause and remaining:
-                        # once we hear speech followed by a pause, we can stop listening early
-                        speech = get_speech_timestamps(
-                            audio, min_silence_duration_ms=1200, min_speech_duration_ms=100, speech_pad_ms=0,
-                        )
-                        if speech and len(audio) - speech[-1]["end"] >= 19200:
-                            break
-            finally:
-                stream.abort()
-        except sd.PortAudioError as error:
-            raise AudioCaptureError(str(error)) from error
-        return self.transcribe(audio)
+                audio, speech_end, pending, pending_end = self._record(
+                    stream, seconds, stop_on_pause, accept_early, decoder, get_speech_timestamps,
+                    pause_seconds,
+                )
+            except sd.PortAudioError as error:
+                raise AudioCaptureError(str(error)) from error
+
+            if pending is not None:
+                # only use the early decode if the mic heard no more speech and all five answers are there
+                same_utterance = speech_end == pending_end
+                if same_utterance or not pending.cancel():
+                    # finish the first decode before reusing the model with the full answer
+                    try:
+                        transcript = pending.result()
+                    except Exception:
+                        transcript = None
+                    if same_utterance and transcript is not None and accept_early(transcript):
+                        return transcript
+            return self.transcribe(audio)
+
+    def _record(self, stream, seconds, stop_on_pause, accept_early, decoder, detect_speech, pause_seconds):
+        rate = int(stream.samplerate)
+        remaining = round(rate * seconds)
+        block = max(1, round(rate * 0.4))
+        end_pause = round(pause_seconds * SPEECH_RATE)
+        divisor = math.gcd(rate, SPEECH_RATE)
+        samples = []
+        speech_end = pending = pending_end = None
+        print(f"Listening for up to {seconds:g} seconds…", flush=True)
+        stream.start()
+        try:
+            while remaining:
+                frames = min(block, remaining)
+                audio, overflowed = stream.read(frames)
+                if overflowed:
+                    raise AudioCaptureError("The microphone dropped audio.")
+                samples.append(audio[:, 0])
+                remaining -= frames
+                if stop_on_pause or not remaining:
+                    audio = resample_poly(np.concatenate(samples), SPEECH_RATE // divisor, rate // divisor)
+                if not stop_on_pause:
+                    continue
+                speech = detect_speech(
+                    audio,
+                    min_silence_duration_ms=320,
+                    min_speech_duration_ms=100 if accept_early is None else 0,
+                    speech_pad_ms=0,
+                )
+                speech_end = speech[-1]["end"] if speech else None
+                if speech_end is None:
+                    continue
+                pause = len(audio) - speech_end
+                if pause >= end_pause:
+                    break
+                if accept_early is not None and pending is None and remaining and pause >= DECODE_PAUSE:
+                    # start at the first pause, but keep recording in case they're still answering
+                    pending = decoder.submit(self.transcribe, audio)
+                    pending_end = speech_end
+        finally:
+            stream.abort()
+        return audio, speech_end, pending, pending_end
