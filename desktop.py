@@ -109,7 +109,8 @@ class EyeChartsDesktop:
             api = ctypes.windll.user32
             api.keybd_event(key, 0, 1, 0)
             api.keybd_event(key, 0, 1 | 2, 0)
-        time.sleep(0.45)
+        # give EyeCharts a moment to redraw. the capture check retries if it's still on the old row
+        time.sleep(0.05)
 
     def say(self, message):
         print(message, flush=True)
