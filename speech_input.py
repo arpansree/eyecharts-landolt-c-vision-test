@@ -5,7 +5,10 @@ import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
+from contextvars import ContextVar
+from functools import partial
 from pathlib import Path
+from time import monotonic
 
 import numpy as np
 from scipy.signal import resample_poly
@@ -13,6 +16,8 @@ from scipy.signal import resample_poly
 TOKEN = re.compile(r"[a-z]+")
 SPEECH_RATE = 16000
 DECODE_PAUSE = 6400
+# keep this setting tied to one decode so it doesn't leak into the next one
+SHORT_WHISPER_WINDOW = ContextVar("short_whisper_window", default=False)
 
 
 class AudioCaptureError(RuntimeError):
@@ -41,6 +46,19 @@ class SpeechInput:
         from faster_whisper.utils import download_model
         from huggingface_hub.errors import LocalEntryNotFoundError
 
+        # same large-v3 model, just a smaller input when we're listening for a short answer
+        class CommandWhisper(WhisperModel):
+            def encode(self, features):
+                if SHORT_WHISPER_WINDOW.get() and features.ndim == 2:
+                    # faster-whisper pads these clips to 30s. keep 8s or enough room for the actual speech
+                    speech_frames = np.flatnonzero(np.any(features != 0, axis=0))
+                    if speech_frames.size:
+                        end = int(speech_frames[-1]) + 1
+                        # leave another second after the last real frame and round to an even number
+                        frames = max(800, ((end + 101) // 2) * 2)
+                        features = features[:, :frames]
+                return super().encode(features)
+
         onnxruntime.disable_telemetry_events()
         print("Loading Whisper large-v3.", flush=True)
         # a live test uses the cached model. only --prepare can download it
@@ -63,7 +81,7 @@ class SpeechInput:
             # hide the experimental MPS tip during Mac startup without hiding errors
             ctranslate2.set_log_level(logging.ERROR)
         try:
-            self.model = WhisperModel(
+            self.model = CommandWhisper(
                 str(model_path), local_files_only=True, device=device,
                 compute_type="float16" if device == "cuda" else "int8",
             )
@@ -72,12 +90,29 @@ class SpeechInput:
                 ctranslate2.set_log_level(log_level)
         self.microphone = microphone
         self._stream = None
+        self.last_capture_seconds = 0.0
 
-    def transcribe(self, audio):
+    def transcribe(self, audio, *, beam_size=5):
+        # only use the quick path for short mic clips on the first try
+        if beam_size == 1 and isinstance(audio, np.ndarray) and len(audio) <= 8 * SPEECH_RATE:
+            token = SHORT_WHISPER_WINDOW.set(True)
+            try:
+                # we only need the words here, so skip timestamps and cap how much text it can generate
+                return self._decode(audio, beam_size, without_timestamps=True, temperature=0, max_new_tokens=16)
+            except (RuntimeError, ValueError):
+                # if this backend can't handle the shorter input, use the regular decode
+                pass
+            finally:
+                # put the normal window back even if the quick decode fails
+                SHORT_WHISPER_WINDOW.reset(token)
+        return self._decode(audio, beam_size)
+
+    def _decode(self, audio, beam_size, **options):
         segments, _ = self.model.transcribe(
-            audio, language="en", beam_size=5, vad_filter=True,
-            condition_on_previous_text=False,
+            audio, language="en", beam_size=beam_size, vad_filter=True,
+            condition_on_previous_text=False, **options,
         )
+        # Whisper does its work as we read through the segments
         return " ".join(segment.text.strip() for segment in segments).strip()
 
     @contextmanager
@@ -102,21 +137,28 @@ class SpeechInput:
         except sd.PortAudioError as error:
             raise AudioCaptureError(f"Could not initialize the microphone: {error}") from error
 
-    def listen(self, seconds, *, stop_on_pause=True, accept_early=None, pause_seconds=1.2):
+    def listen(self, seconds, *, stop_on_pause=True, accept_early=None, pause_seconds=1.2, beam_size=5):
         import sounddevice as sd
         from faster_whisper.vad import get_speech_timestamps
 
+        self.last_capture_seconds = 0.0
         stream = self._stream
         if stream is None:
             raise AudioCaptureError("The microphone has not been prepared.")
+        # use the same search settings whether we start early or wait for the full answer
+        decode = partial(self.transcribe, beam_size=beam_size)
         with ThreadPoolExecutor(max_workers=1) as decoder:
+            capture_started = monotonic()
             try:
                 audio, speech_end, pending, pending_end = self._record(
-                    stream, seconds, stop_on_pause, accept_early, decoder, get_speech_timestamps,
+                    stream, seconds, stop_on_pause, accept_early, partial(decoder.submit, decode), get_speech_timestamps,
                     pause_seconds,
                 )
             except sd.PortAudioError as error:
                 raise AudioCaptureError(str(error)) from error
+            finally:
+                # measure recording separately from the wait for Whisper after the mic closes
+                self.last_capture_seconds = monotonic() - capture_started
 
             if pending is not None:
                 # only use the early decode if the mic heard no more speech and all five answers are there
@@ -129,9 +171,9 @@ class SpeechInput:
                         transcript = None
                     if same_utterance and transcript is not None and accept_early(transcript):
                         return transcript
-            return self.transcribe(audio)
+            return decode(audio)
 
-    def _record(self, stream, seconds, stop_on_pause, accept_early, decoder, detect_speech, pause_seconds):
+    def _record(self, stream, seconds, stop_on_pause, accept_early, submit_decode, detect_speech, pause_seconds):
         rate = int(stream.samplerate)
         remaining = round(rate * seconds)
         block = max(1, round(rate * 0.4))
@@ -167,7 +209,7 @@ class SpeechInput:
                     break
                 if accept_early is not None and pending is None and remaining and pause >= DECODE_PAUSE:
                     # start at the first pause, but keep recording in case they're still answering
-                    pending = decoder.submit(self.transcribe, audio)
+                    pending = submit_decode(audio)
                     pending_end = speech_end
         finally:
             stream.abort()
