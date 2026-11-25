@@ -40,7 +40,7 @@ On macOS, allow Terminal or Python access to Screen Recording, Accessibility, an
 
 EyeCharts resets to 20/200 between rounds. To protect user privacy, the app keeps scores out of the spoken prompts. The kiosk is where users will review and optionally print their results.
 
-The app can start transcribing during a pause while the mic is still listening. It uses that result only if there are five valid answers and it hears no more speech. If it needs a repeat, it listens for the full answer window. The terminal shows the total test time after completion.
+The app can start transcribing during a pause while the mic is still listening. It uses that result only if there are five valid answers and it hears no more speech. First attempts use a shorter Whisper input window for brief answers. Retries use the standard window and a wider search. Add `--timing` for a terminal timing breakdown.
 
 ## Save results
 
