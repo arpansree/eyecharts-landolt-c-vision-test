@@ -1,5 +1,6 @@
 """Both-eyes and per-eye scoring workflow. Session data stays in memory."""
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 
 from chart_reader import Chart, ChartError, DIRECTIONS, read_acuity, read_directions
@@ -46,6 +47,8 @@ class VisionTest:
         self.tesseract = tesseract
         self.listen_seconds = listen_seconds
         self.session = Session()
+        # keep these timing totals separate from the results we save
+        self.timings = Counter()
 
     def capture(self, expected, *, read_row=True, startup=False):
         # give EyeCharts extra time at startup, when it might still be opening
@@ -93,6 +96,7 @@ class VisionTest:
 
     def answer(self, row, *, prompt):
         for attempt in range(4):
+            started = time.monotonic()
             if attempt:
                 message = (
                     "We couldn’t quite get that, please repeat by giving one answer for each of the five symbols, "
@@ -102,15 +106,27 @@ class VisionTest:
                 message = prompt
             self.desktop.say(message)
             # if they paused too long the first time, give them the whole window on a retry
+            listening = time.monotonic()
+            # try the quick search first, then look at more possible answers on retries
             transcript = self.listen(
                 self.listen_seconds, stop_on_pause=attempt == 0,
                 accept_early=lambda text: parse_answers(text, DIRECTIONS) is not None,
+                beam_size=1 if attempt == 0 else 5,
             )
+            audio_seconds = getattr(self.speech, "last_capture_seconds", 0.0)
+            self.timings["row_recording"] += audio_seconds
+            # some decoding happens during recording, so only count the wait that's left
+            self.timings["row_decode_wait"] += max(0, time.monotonic() - listening - audio_seconds)
+            if attempt:
+                self.timings["row_retries"] += 1
             row.transcripts.append(transcript)
             # make sure we're scoring against the row they actually saw
             if self.capture(row.chart.acuity) != row.chart:
                 raise ChartError("The EyeCharts row changed while the participant was answering.")
             row.answers = parse_answers(transcript, DIRECTIONS)
+            if attempt:
+                # count the whole retry so we can tell how much time repeats added
+                self.timings["row_retry_seconds"] += time.monotonic() - started
             if row.answers is not None:
                 row.matches = tuple(actual == expected for actual, expected in zip(
                     row.answers, row.chart.directions, strict=True
@@ -121,11 +137,11 @@ class VisionTest:
             message += " Let’s move on to the next row."
         self.desktop.say(message)
 
-    def listen(self, seconds, *, stop_on_pause=True, accept_early=None, pause_seconds=1.2):
+    def listen(self, seconds, *, stop_on_pause=True, accept_early=None, pause_seconds=1.2, beam_size=5):
         try:
             return self.speech.listen(
                 seconds, stop_on_pause=stop_on_pause, accept_early=accept_early,
-                pause_seconds=pause_seconds,
+                pause_seconds=pause_seconds, beam_size=beam_size,
             )
         except AudioCaptureError as error:
             print(f"Microphone capture failed: {error}", flush=True)
@@ -134,15 +150,20 @@ class VisionTest:
     def wait_for_start(self, instruction, seconds):
         accepted = (["ready"], ["start"], ["i", "am", "ready"], ["i", "m", "ready"])
         for attempt in range(4):
+            started = time.monotonic()
             message = instruction if attempt == 0 else "Please say ready or start."
             self.desktop.say(message)
             # a short command doesn't need the longer pause we allow between row answers
-            if words(self.listen(seconds, pause_seconds=0.4)) in accepted:
+            ready = words(self.listen(seconds, pause_seconds=0.4, beam_size=1 if attempt == 0 else 5)) in accepted
+            # include the spoken prompt here since it's part of the wait to get started
+            self.timings["readiness"] += time.monotonic() - started
+            self.timings["readiness_retries"] += bool(attempt)
+            if ready:
                 return True
         return False
 
     def ready(self, cover):
-        instruction = f"Cover your {cover} eye with the occluder. When you are ready, say the words, ready, or start."
+        instruction = f"Use the eye cover to cover your {cover} eye. When you’re ready, say ready or start."
         if not self.wait_for_start(instruction, max(8, self.listen_seconds)):
             raise ChartError("Could not confirm readiness. The next eye was not tested.")
 
